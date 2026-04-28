@@ -3,6 +3,8 @@ using VotingSystem.Api.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddControllers();
+
 // Add services to the container.
 builder.Services.AddControllers();
 
@@ -25,3 +27,5 @@ app.UseHttpsRedirection();
 app.MapControllers();
 
 app.Run();
+
+public partial class Program { }
