@@ -1,20 +1,20 @@
 using Microsoft.EntityFrameworkCore;
+using VotingSystem.Api.Infrastructure;
 using VotingSystem.Api.Infrastructure.Data;
+using VotingSystem.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddScoped<IElectionService, ElectionService>();
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
 builder.Services.AddDbContext<VotingDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-
-using VotingSystem.Api.Infrastructure;
 
 var app = builder.Build();
 
