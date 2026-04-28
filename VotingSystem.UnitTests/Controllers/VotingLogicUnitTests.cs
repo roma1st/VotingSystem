@@ -7,6 +7,8 @@ using VotingSystem.Api.DTOs;
 using VotingSystem.Api.Infrastructure.Data;
 using Xunit;
 
+using VotingSystem.Api.Services;
+
 namespace VotingSystem.UnitTests.Controllers;
 
 public class VotingLogicUnitTests
@@ -24,7 +26,8 @@ public class VotingLogicUnitTests
     public async Task Vote_SingleChoice_ShouldCalculateCorrectly()
     {
         using var context = new VotingDbContext(_options);
-        var controller = new ElectionsController(context);
+        var service = new ElectionService(context);
+        var controller = new ElectionsController(service);
 
         var electionId = Guid.NewGuid();
         var candidate1 = new Candidate { Id = Guid.NewGuid(), ElectionId = electionId, Name = "C1", Description = "D1", Party = "P1" };
@@ -60,7 +63,8 @@ public class VotingLogicUnitTests
     public async Task Vote_RankedChoice_ShouldCalculateByBordaCount()
     {
         using var context = new VotingDbContext(_options);
-        var controller = new ElectionsController(context);
+        var service = new ElectionService(context);
+        var controller = new ElectionsController(service);
 
         var electionId = Guid.NewGuid();
         var candidate1 = new Candidate { Id = Guid.NewGuid(), ElectionId = electionId, Name = "C1", Description = "D", Party = "P" };
@@ -100,7 +104,8 @@ public class VotingLogicUnitTests
     public async Task GetTurnout_ShouldReturnUniqueVotersCount()
     {
         using var context = new VotingDbContext(_options);
-        var controller = new ElectionsController(context);
+        var service = new ElectionService(context);
+        var controller = new ElectionsController(service);
 
         var electionId = Guid.NewGuid();
         context.Elections.Add(new Election { Id = electionId, Title = "T", Description = "D", Status = ElectionStatus.Active, Type = ElectionType.SingleChoice });
