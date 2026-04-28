@@ -115,4 +115,91 @@ public class ElectionsController : ControllerBase
 
         return NoContent();
     }
+
+    [HttpPost("{id}/vote")]
+    public async Task<IActionResult> Vote(Guid id, [FromBody] SubmitVoteDto request)
+    {
+        var election = await _context.Elections.Include(e => e.Candidates).FirstOrDefaultAsync(e => e.Id == id);
+        if (election == null) return NotFound();
+
+        if (election.Status != ElectionStatus.Active)
+            return BadRequest("Голосувати можна тільки під час активного періоду виборів.");
+
+        var hasVoted = await _context.Votes.AnyAsync(v => v.ElectionId == id && v.VoterEmail == request.VoterEmail);
+        if (hasVoted)
+            return BadRequest("Ви вже проголосували на цих виборах.");
+
+        if (election.Type == ElectionType.SingleChoice)
+        {
+            if (request.Votes.Count != 1) return BadRequest("Для цих виборів потрібно обрати рівно одного кандидата.");
+            var candidateId = request.Votes.First().CandidateId;
+            if (!election.Candidates.Any(c => c.Id == candidateId)) return BadRequest("Кандидата не знайдено.");
+            
+            _context.Votes.Add(new Vote { ElectionId = id, VoterEmail = request.VoterEmail, CandidateId = candidateId, CastAt = DateTime.UtcNow });
+        }
+        else if (election.Type == ElectionType.RankedChoice)
+        {
+            var candidateIds = election.Candidates.Select(c => c.Id).ToList();
+            if (request.Votes.Count != candidateIds.Count) return BadRequest("Потрібно проранжувати всіх кандидатів.");
+            
+            var submittedCandidateIds = request.Votes.Select(v => v.CandidateId).ToList();
+            if (submittedCandidateIds.Distinct().Count() != candidateIds.Count || !submittedCandidateIds.All(cid => candidateIds.Contains(cid)))
+                return BadRequest("Неправильні кандидати для ранжування.");
+
+            var allRanks = request.Votes.Select(v => v.Rank ?? 0).ToList();
+            if (allRanks.Distinct().Count() != candidateIds.Count || allRanks.Any(r => r <= 0 || r > candidateIds.Count))
+                return BadRequest("Недійсні ранги: ранги повинні бути унікальними та від 1 до N.");
+
+            foreach (var voteItem in request.Votes)
+            {
+                _context.Votes.Add(new Vote { ElectionId = id, VoterEmail = request.VoterEmail, CandidateId = voteItem.CandidateId, Rank = voteItem.Rank.Value, CastAt = DateTime.UtcNow });
+            }
+        }
+
+        await _context.SaveChangesAsync();
+        return Ok();
+    }
+
+    [HttpGet("{id}/results")]
+    public async Task<IActionResult> GetResults(Guid id)
+    {
+        var election = await _context.Elections.Include(e => e.Candidates).FirstOrDefaultAsync(e => e.Id == id);
+        if (election == null) return NotFound();
+
+        if (election.Status != ElectionStatus.Closed)
+            return BadRequest("Результати видимі тільки після закриття виборів.");
+
+        var votes = await _context.Votes.Where(v => v.ElectionId == id).ToListAsync();
+        var results = new List<CandidateResultDto>();
+
+        if (election.Type == ElectionType.SingleChoice)
+        {
+            var grouped = votes.GroupBy(v => v.CandidateId).ToDictionary(g => g.Key, g => g.Count());
+            results = election.Candidates.Select(c => new CandidateResultDto(c.Id, c.Name, grouped.GetValueOrDefault(c.Id, 0))).ToList();
+        }
+        else if (election.Type == ElectionType.RankedChoice)
+        {
+            // Використовуємо Borda Count для простоти розрахунків
+            var N = election.Candidates.Count;
+            var grouped = votes.GroupBy(v => v.CandidateId).ToDictionary(g => g.Key, g => g.Sum(v => N - (v.Rank ?? 0) + 1));
+            results = election.Candidates.Select(c => new CandidateResultDto(c.Id, c.Name, grouped.GetValueOrDefault(c.Id, 0))).ToList();
+        }
+
+        return Ok(new ElectionResultDto(id, results.OrderByDescending(r => r.Score).ToList()));
+    }
+
+    [HttpGet("{id}/turnout")]
+    public async Task<IActionResult> GetTurnout(Guid id)
+    {
+        var election = await _context.Elections.FindAsync(id);
+        if (election == null) return NotFound();
+
+        var totalVoters = await _context.Votes
+            .Where(v => v.ElectionId == id)
+            .Select(v => v.VoterEmail)
+            .Distinct()
+            .CountAsync();
+
+        return Ok(new TurnoutResponseDto(id, totalVoters));
+    }
 }
