@@ -19,13 +19,7 @@ builder.Services.AddDbContext<VotingDbContext>(options =>
 var app = builder.Build();
 
 // Наповнюємо базу даних (Seeding 10 000 записів для тестування продуктивності)
-using (var scope = app.Services.CreateScope())
-{
-    var context = scope.ServiceProvider.GetRequiredService<VotingDbContext>();
-    // Автоматично створюємо/мігруємо базу
-    context.Database.Migrate();
-    await DbSeeder.SeedAsync(context);
-}
+using (var scope = app.Services.CreateScope()){var context = scope.ServiceProvider.GetRequiredService<VotingDbContext>(); if(app.Environment.EnvironmentName != "Testing"){context.Database.Migrate(); await DbSeeder.SeedAsync(context);}}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -40,3 +34,4 @@ app.MapControllers();
 app.Run();
 
 public partial class Program { }
+

@@ -24,7 +24,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
     {
-        builder.ConfigureServices(services =>
+        builder.UseSetting("Environment", "Testing"); builder.ConfigureServices(services =>
         {
             services.RemoveAll(typeof(DbContextOptions<VotingDbContext>));
             services.RemoveAll(typeof(VotingDbContext));
@@ -48,3 +48,5 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         await _dbContainer.DisposeAsync();
     }
 }
+
+
