@@ -69,8 +69,7 @@ public class DatabaseConstraintsTests : IClassFixture<CustomWebApplicationFactor
         await context.SaveChangesAsync();
 
         // Delete election
-        context.Elections.Remove(election);
-        await context.SaveChangesAsync();
+        await context.Elections.Where(e => e.Id == electionId).ExecuteDeleteAsync();
 
         // Ensure candidates and votes are gone
         var isCandidateExists = await context.Candidates.AnyAsync(c => c.Id == candidateId);
@@ -80,3 +79,4 @@ public class DatabaseConstraintsTests : IClassFixture<CustomWebApplicationFactor
         Assert.False(isVoteExists);
     }
 }
+
