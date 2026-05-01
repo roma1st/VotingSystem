@@ -21,6 +21,9 @@ public class DatabaseConstraintsTests : IClassFixture<CustomWebApplicationFactor
         _factory = factory;
     }
 
+    // Перевіряє обмеження унікальності на рівні реальної БД PostgreSQL.
+    // Переконується, що якщо користувач спробує проголосувати двічі за того ж кандидата,
+    // база даних відхилить транзакцію з помилкою DbUpdateException.
     [Fact]
     public async Task Vote_UniqueIndex_ShouldPreventMultipleVotesBySameUserForSaveGivenElectionAndCandidate()
     {
