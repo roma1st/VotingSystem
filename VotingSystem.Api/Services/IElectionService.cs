@@ -9,6 +9,7 @@ public interface IElectionService
     Task<ElectionResponseDto> CreateElectionAsync(CreateElectionDto request);
     Task<ElectionResponseDto> GetElectionAsync(Guid id);
     Task<CandidateResponseDto> AddCandidateAsync(Guid electionId, CreateCandidateDto request);
+    Task OpenElectionAsync(Guid electionId);
     Task CloseElectionAsync(Guid electionId);
     Task VoteAsync(Guid electionId, SubmitVoteDto request);
     Task<ElectionResultDto> GetResultsAsync(Guid electionId);

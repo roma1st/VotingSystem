@@ -7,6 +7,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 
+builder.Services.AddMemoryCache();
+
 // Add services to the container.
 builder.Services.AddScoped<IElectionService, ElectionService>();
 

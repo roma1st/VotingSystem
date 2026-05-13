@@ -17,14 +17,12 @@ public class VotingDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // Election Configuration
         modelBuilder.Entity<Election>(entity =>
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Title).IsRequired().HasMaxLength(200);
             entity.Property(e => e.Description).IsRequired().HasMaxLength(1000);
             
-            // Каскадне видалення: якщо видаляють вибори, видаляються і кандидати, і голоси
             entity.HasMany(e => e.Candidates)
                   .WithOne(c => c.Election)
                   .HasForeignKey(c => c.ElectionId)
@@ -44,23 +42,16 @@ public class VotingDbContext : DbContext
             entity.Property(c => c.Description).IsRequired().HasMaxLength(500);
             entity.Property(c => c.Party).IsRequired().HasMaxLength(100);
             
-            // Зв'язок Кандидат -> Голоси (Restrict - не можна видалити кандидата, якщо за нього вже проголосували)
             entity.HasMany(c => c.Votes)
                   .WithOne(v => v.Candidate)
                   .HasForeignKey(v => v.CandidateId)
                   .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // Vote Configuration
         modelBuilder.Entity<Vote>(entity =>
         {
             entity.HasKey(v => v.Id);
             entity.Property(v => v.VoterEmail).IsRequired().HasMaxLength(150);
-
-            // Бізнес-правило: Один голос на email на вибори (Унікальний індекс)
-            // Примітка: Для RankedChoice цей індекс потрібно буде адаптувати, 
-            // оскільки один виборець може мати кілька записів Vote з різними Rank для одних виборів.
-            // Щоб врахувати RankedChoice: робимо унікальним (ElectionId, VoterEmail, CandidateId)
             entity.HasIndex(v => new { v.ElectionId, v.VoterEmail, v.CandidateId }).IsUnique();
         });
     }

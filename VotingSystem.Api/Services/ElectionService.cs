@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using VotingSystem.Api.Domain.Entities;
 using VotingSystem.Api.Domain.Enums;
 using VotingSystem.Api.DTOs;
@@ -13,26 +14,59 @@ namespace VotingSystem.Api.Services;
 public class ElectionService : IElectionService
 {
     private readonly VotingDbContext _context;
+    private readonly IMemoryCache _cache;
 
-    public ElectionService(VotingDbContext context)
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(30);
+
+    private static readonly ElectionStatus?[] StatusVariants =
+    {
+        null,
+        ElectionStatus.Draft,
+        ElectionStatus.Active,
+        ElectionStatus.Closed
+    };
+
+    public ElectionService(VotingDbContext context, IMemoryCache cache)
     {
         _context = context;
+        _cache = cache;
+    }
+
+    private static string ListKey(ElectionStatus? status) =>
+        $"elections:list:{status?.ToString() ?? "all"}";
+
+    private static string ElectionKey(Guid id) => $"election:{id}";
+
+    private static string ResultsKey(Guid id) => $"results:{id}";
+
+    private void InvalidateListCache()
+    {
+        foreach (var s in StatusVariants)
+            _cache.Remove(ListKey(s));
+    }
+
+    private void InvalidateElectionCache(Guid id)
+    {
+        _cache.Remove(ElectionKey(id));
+        _cache.Remove(ResultsKey(id));
+        InvalidateListCache();
     }
 
     public async Task<IEnumerable<ElectionResponseDto>> GetElectionsAsync(ElectionStatus? status)
     {
-        var query = _context.Elections.AsQueryable();
-
-        if (status.HasValue)
+        var key = ListKey(status);
+        var cached = await _cache.GetOrCreateAsync(key, async entry =>
         {
-            query = query.Where(e => e.Status == status);
-        }
-
-        return await query
-            .Select(e => new ElectionResponseDto(
-                e.Id, e.Title, e.Description, e.StartDate, e.EndDate, e.Status, e.Type,
-                e.Candidates.Select(c => new CandidateResponseDto(c.Id, c.Name, c.Description, c.Party, c.PhotoUrl))))
-            .ToListAsync();
+            entry.AbsoluteExpirationRelativeToNow = CacheTtl;
+            var query = _context.Elections.AsQueryable();
+            if (status.HasValue) query = query.Where(e => e.Status == status);
+            return await query
+                .Select(e => new ElectionResponseDto(
+                    e.Id, e.Title, e.Description, e.StartDate, e.EndDate, e.Status, e.Type,
+                    e.Candidates.Select(c => new CandidateResponseDto(c.Id, c.Name, c.Description, c.Party, c.PhotoUrl))))
+                .ToListAsync();
+        });
+        return cached!;
     }
 
     public async Task<ElectionResponseDto> CreateElectionAsync(CreateElectionDto request)
@@ -50,22 +84,31 @@ public class ElectionService : IElectionService
         _context.Elections.Add(election);
         await _context.SaveChangesAsync();
 
+        InvalidateListCache();
+
         return new ElectionResponseDto(
-            election.Id, election.Title, election.Description, election.StartDate, election.EndDate, election.Status, election.Type, 
+            election.Id, election.Title, election.Description, election.StartDate, election.EndDate, election.Status, election.Type,
             new List<CandidateResponseDto>());
     }
 
     public async Task<ElectionResponseDto> GetElectionAsync(Guid id)
     {
+        var key = ElectionKey(id);
+        if (_cache.TryGetValue(key, out ElectionResponseDto? cached) && cached is not null)
+            return cached;
+
         var election = await _context.Elections
             .Include(e => e.Candidates)
             .FirstOrDefaultAsync(e => e.Id == id);
 
         if (election == null) throw new KeyNotFoundException("Вибори не знайдено.");
 
-        return new ElectionResponseDto(
+        var dto = new ElectionResponseDto(
             election.Id, election.Title, election.Description, election.StartDate, election.EndDate, election.Status, election.Type,
             election.Candidates.Select(c => new CandidateResponseDto(c.Id, c.Name, c.Description, c.Party, c.PhotoUrl)));
+
+        _cache.Set(key, dto, CacheTtl);
+        return dto;
     }
 
     public async Task<CandidateResponseDto> AddCandidateAsync(Guid electionId, CreateCandidateDto request)
@@ -88,7 +131,23 @@ public class ElectionService : IElectionService
         _context.Candidates.Add(candidate);
         await _context.SaveChangesAsync();
 
+        InvalidateElectionCache(electionId);
+
         return new CandidateResponseDto(candidate.Id, candidate.Name, candidate.Description, candidate.Party, candidate.PhotoUrl);
+    }
+
+    public async Task OpenElectionAsync(Guid electionId)
+    {
+        var election = await _context.Elections.FindAsync(electionId);
+        if (election == null) throw new KeyNotFoundException("Вибори не знайдено.");
+
+        if (election.Status != ElectionStatus.Draft)
+            throw new InvalidOperationException("Відкрити можна лише вибори у статусі Draft.");
+
+        election.Status = ElectionStatus.Active;
+        await _context.SaveChangesAsync();
+
+        InvalidateElectionCache(electionId);
     }
 
     public async Task CloseElectionAsync(Guid electionId)
@@ -101,6 +160,8 @@ public class ElectionService : IElectionService
 
         election.Status = ElectionStatus.Closed;
         await _context.SaveChangesAsync();
+
+        InvalidateElectionCache(electionId);
     }
 
     public async Task VoteAsync(Guid electionId, SubmitVoteDto request)
@@ -120,14 +181,14 @@ public class ElectionService : IElectionService
             if (request.Votes.Count != 1) throw new InvalidOperationException("Для цих виборів потрібно обрати рівно одного кандидата.");
             var candidateId = request.Votes.First().CandidateId;
             if (!election.Candidates.Any(c => c.Id == candidateId)) throw new InvalidOperationException("Кандидата не знайдено.");
-            
+
             _context.Votes.Add(new Vote { ElectionId = electionId, VoterEmail = request.VoterEmail, CandidateId = candidateId, CastAt = DateTime.UtcNow });
         }
         else if (election.Type == ElectionType.RankedChoice)
         {
             var candidateIds = election.Candidates.Select(c => c.Id).ToList();
             if (request.Votes.Count != candidateIds.Count) throw new InvalidOperationException("Потрібно проранжувати всіх кандидатів.");
-            
+
             var submittedCandidateIds = request.Votes.Select(v => v.CandidateId).ToList();
             if (submittedCandidateIds.Distinct().Count() != candidateIds.Count || !submittedCandidateIds.All(cid => candidateIds.Contains(cid)))
                 throw new InvalidOperationException("Неправильні кандидати для ранжування.");
@@ -138,15 +199,21 @@ public class ElectionService : IElectionService
 
             foreach (var voteItem in request.Votes)
             {
-                _context.Votes.Add(new Vote { ElectionId = electionId, VoterEmail = request.VoterEmail, CandidateId = voteItem.CandidateId, Rank = voteItem.Rank.Value, CastAt = DateTime.UtcNow });
+                _context.Votes.Add(new Vote { ElectionId = electionId, VoterEmail = request.VoterEmail, CandidateId = voteItem.CandidateId, Rank = voteItem.Rank!.Value, CastAt = DateTime.UtcNow });
             }
         }
 
         await _context.SaveChangesAsync();
+
+        _cache.Remove(ResultsKey(electionId));
     }
 
     public async Task<ElectionResultDto> GetResultsAsync(Guid electionId)
     {
+        var key = ResultsKey(electionId);
+        if (_cache.TryGetValue(key, out ElectionResultDto? cached) && cached is not null)
+            return cached;
+
         var election = await _context.Elections.Include(e => e.Candidates).FirstOrDefaultAsync(e => e.Id == electionId);
         if (election == null) throw new KeyNotFoundException("Вибори не знайдено.");
 
@@ -163,12 +230,14 @@ public class ElectionService : IElectionService
         }
         else if (election.Type == ElectionType.RankedChoice)
         {
-            var N = election.Candidates.Count;
-            var grouped = votes.GroupBy(v => v.CandidateId).ToDictionary(g => g.Key, g => g.Sum(v => N - (v.Rank ?? 0) + 1));
+            var n = election.Candidates.Count;
+            var grouped = votes.GroupBy(v => v.CandidateId).ToDictionary(g => g.Key, g => g.Sum(v => n - (v.Rank ?? 0) + 1));
             results = election.Candidates.Select(c => new CandidateResultDto(c.Id, c.Name, grouped.GetValueOrDefault(c.Id, 0))).ToList();
         }
 
-        return new ElectionResultDto(electionId, results.OrderByDescending(r => r.Score).ToList());
+        var dto = new ElectionResultDto(electionId, results.OrderByDescending(r => r.Score).ToList());
+        _cache.Set(key, dto, CacheTtl);
+        return dto;
     }
 
     public async Task<TurnoutResponseDto> GetTurnoutAsync(Guid electionId)

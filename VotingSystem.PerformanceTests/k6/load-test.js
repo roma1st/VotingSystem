@@ -1,71 +1,47 @@
-import http from 'k6/http';
-import { check, sleep } from 'k6';
+// Load test — нормальне навантаження.
+// Запуск: k6 run k6/load-test.js
 
-export let options = {
+import { check, sleep } from 'k6';
+import { vote, getResults, getElections, getElection } from './helpers/api-client.js';
+import { voterEmail, DEFAULT_THRESHOLDS } from './helpers/config.js';
+import { prepareActiveElection } from './helpers/api-client.js';
+
+export const options = {
     stages: [
-        { duration: '3s', target: 20 },  // Розігрів
-        { duration: '5s', target: 50 },  // Навантаження
-        { duration: '2s', target: 0 },   // Охолодження
+        { duration: '15s', target: 10 },
+        { duration: '30s', target: 30 },
+        { duration: '15s', target: 0 },
     ],
+    thresholds: {
+        ...DEFAULT_THRESHOLDS,
+        checks: ['rate>0.95'],
+    },
 };
 
-const BASE_URL = 'http://localhost:5032'; 
-
-// 1. Setup: Запускається 1 раз перед тестами. Готує дані!
 export function setup() {
-    let params = { headers: { 'Content-Type': 'application/json' } };
-    
-    // Створюємо вибори
-    let createRes = http.post(`${BASE_URL}/api/elections`, JSON.stringify({
-        title: "Load Test Election",
-        description: "Checking performance",
-        startDate: new Date().toISOString(),
-        endDate: new Date(new Date().getTime() + 86400000).toISOString(),
-        type: 0 // SingleChoice
-    }), params);
-    
-    if (createRes.status !== 200 && createRes.status !== 201) return null;
-    let electionId = JSON.parse(createRes.body).id;
-
-    // Додаємо кандидата
-    let candRes = http.post(`${BASE_URL}/api/elections/${electionId}/candidates`, JSON.stringify({
-        name: "Test Candidate",
-        description: "Candidate for Load",
-        party: "Tech Party"
-    }), params);
-    let candidateId = JSON.parse(candRes.body).id;
-
-    // Відкриваємо вибори
-    http.post(`${BASE_URL}/api/elections/${electionId}/open`, null, params);
-
-    return { electionId: electionId, candidateId: candidateId }; // Передаємо ці ID віртуальним юзерам
+    // Готуємо активні вибори з кандидатом, які потім обстріляють VU.
+    return prepareActiveElection({ type: 0 });
 }
 
-// 2. Default: Запускається тисячі разів віртуальними користувачами
 export default function (data) {
-    if (!data) return; // Якщо setup впав, нічого не робимо
+    if (!data || !data.electionId) return;
 
-    let getResponse = http.get(`${BASE_URL}/api/elections/${data.electionId}/results`);
+    // Читання — найбільший вплив від кешу.
+    check(getElection(data.electionId), {
+        'get election 200': (r) => r.status === 200,
+    });
 
-    let randomEmail = `user_${__VU}_${__ITER}_${Math.random().toString(36).substring(7)}@example.com`;
-    
-    let votePayload = JSON.stringify({
-        voterEmail: randomEmail,
-        votes: [
-            { candidateId: data.candidateId, rank: null }
-        ]
+    check(getElections(1), {
+        'list active 200': (r) => r.status === 200,
     });
-    
-    let params = { headers: { 'Content-Type': 'application/json' } };
-    let postResponse = http.post(`${BASE_URL}/api/elections/${data.electionId}/vote`, votePayload, params);
-    
-    check(getResponse, {
-        'GET results status is 200': (r) => r.status === 200,
+
+    // Запис — більшість будуть валідні; деякі повертатимуть 400 (дубль email).
+    const voteRes = vote(data.electionId, voterEmail('load'), [
+        { candidateId: data.candidateId, rank: null },
+    ]);
+    check(voteRes, {
+        'vote 200 or duplicate 400': (r) => r.status === 200 || r.status === 400,
     });
-    
-    check(postResponse, {
-        'POST vote status is 200 (Success)': (r) => r.status === 200,
-    });
-    
-    sleep(0.1); 
+
+    sleep(0.2);
 }

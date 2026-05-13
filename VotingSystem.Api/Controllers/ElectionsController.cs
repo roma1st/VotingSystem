@@ -62,6 +62,24 @@ public class ElectionsController : ControllerBase
         }
     }
 
+    [HttpPost("{id}/open")]
+    public async Task<IActionResult> OpenElection(Guid id)
+    {
+        try
+        {
+            await _electionService.OpenElectionAsync(id);
+            return NoContent();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
     [HttpPatch("{id}/close")]
     public async Task<IActionResult> CloseElection(Guid id)
     {

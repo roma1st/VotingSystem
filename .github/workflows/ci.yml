@@ -27,21 +27,21 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '8.0.x'
-        
+        dotnet-version: '10.0.x'
+
     - name: Restore dependencies
       run: dotnet restore
-      
+
     - name: Build
       run: dotnet build --no-restore --configuration Release
-      
+
     - name: Test Unit Tests
       run: dotnet test VotingSystem.UnitTests/VotingSystem.UnitTests.csproj --no-build --verbosity normal --configuration Release
-      
+
     - name: Test Integration Tests
       run: dotnet test VotingSystem.IntegrationTests/VotingSystem.IntegrationTests.csproj --no-build --verbosity normal --configuration Release
 
@@ -70,7 +70,7 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '8.0.x'
+        dotnet-version: '10.0.x'
 
     - name: Setup k6
       uses: grafana/setup-k6-action@v1
@@ -84,11 +84,11 @@ jobs:
       run: dotnet run --project VotingSystem.Api/VotingSystem.Api.csproj --configuration Release &
       env:
         ASPNETCORE_URLS: http://localhost:5032
-        
+
     - name: Wait for API to be ready
       run: |
-        for i in $(seq 1 30); do
-          if curl -s -o /dev/null -w "%{http_code}" localhost:5032/swagger/index.html | grep -q "200"; then
+        for i in $(seq 1 60); do
+          if curl -s -o /dev/null -w "%{http_code}" localhost:5032/api/elections | grep -q "200"; then
             echo "API is ready"
             break
           fi
@@ -96,12 +96,21 @@ jobs:
           sleep 2
         done
 
-    - name: Run k6 Load Test
-      run: k6 run VotingSystem.PerformanceTests/k6/load-test.js --summary-export=k6-results.json
+    - name: Run k6 Smoke Test
+      run: k6 run VotingSystem.PerformanceTests/k6/smoke-test.js --summary-export=k6-smoke.json
 
-    - name: Upload results
+    - name: Run k6 Load Test
+      run: k6 run VotingSystem.PerformanceTests/k6/load-test.js --summary-export=k6-load.json
+
+    - name: Run k6 Stress Test
+      run: k6 run VotingSystem.PerformanceTests/k6/stress-test.js --summary-export=k6-stress.json
+
+    - name: Upload k6 results
       uses: actions/upload-artifact@v4
       if: always()
       with:
         name: k6-results
-        path: k6-results.json
+        path: |
+          k6-smoke.json
+          k6-load.json
+          k6-stress.json
