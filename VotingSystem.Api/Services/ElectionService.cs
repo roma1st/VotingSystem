@@ -144,6 +144,10 @@ public class ElectionService : IElectionService
         if (election.Status != ElectionStatus.Draft)
             throw new InvalidOperationException("Відкрити можна лише вибори у статусі Draft.");
 
+        var candidateCount = await _context.Candidates.CountAsync(c => c.ElectionId == electionId);
+        if (candidateCount < 2)
+            throw new InvalidOperationException("Вибори повинні мати щонайменше 2 кандидатів.");
+
         election.Status = ElectionStatus.Active;
         await _context.SaveChangesAsync();
 
@@ -171,6 +175,10 @@ public class ElectionService : IElectionService
 
         if (election.Status != ElectionStatus.Active)
             throw new InvalidOperationException("Голосувати можна тільки під час активного періоду виборів.");
+
+        var now = DateTime.UtcNow;
+        if (now < election.StartDate || now > election.EndDate)
+            throw new InvalidOperationException("Голосування поза дозволеним періодом (StartDate–EndDate).");
 
         var hasVoted = await _context.Votes.AnyAsync(v => v.ElectionId == electionId && v.VoterEmail == request.VoterEmail);
         if (hasVoted)
