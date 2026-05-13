@@ -10,6 +10,8 @@ public class ElectionService_LifecycleTests
     {
         using var ctx = TestHelpers.CreateInMemoryContext();
         var election = TestHelpers.BuildElection(ElectionStatus.Draft);
+        election.Candidates.Add(TestHelpers.BuildCandidate(election.Id, "C1"));
+        election.Candidates.Add(TestHelpers.BuildCandidate(election.Id, "C2"));
         ctx.Elections.Add(election);
         await ctx.SaveChangesAsync();
 
