@@ -1,12 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
-using AutoFixture;
 using VotingSystem.Api.Domain.Enums;
 using VotingSystem.Api.DTOs;
 using VotingSystem.IntegrationTests.Infrastructure;
-using Microsoft.Extensions.DependencyInjection;
-using VotingSystem.Api.Infrastructure.Data;
-using VotingSystem.Api.Domain.Entities;
 using Xunit;
 
 namespace VotingSystem.IntegrationTests.Integration;
@@ -14,12 +10,9 @@ namespace VotingSystem.IntegrationTests.Integration;
 public class LifecycleTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;
-    private readonly CustomWebApplicationFactory _factory;
-    private readonly Fixture _fixture = new();
 
     public LifecycleTests(CustomWebApplicationFactory factory)
     {
-        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -44,24 +37,19 @@ public class LifecycleTests : IClassFixture<CustomWebApplicationFactory>
         var candidate1 = await rC1.Content.ReadFromJsonAsync<CandidateResponseDto>();
 
         var rC2 = await _client.PostAsJsonAsync($"/api/elections/{electionId}/candidates", c2);
+        rC2.EnsureSuccessStatusCode();
         var candidate2 = await rC2.Content.ReadFromJsonAsync<CandidateResponseDto>();
+        Assert.NotNull(candidate1);
+        Assert.NotNull(candidate2);
 
         // 3. Try voting during Draft (Should fail)
-        var voteRequest = new SubmitVoteDto("voter@test.com", new List<VoteItemDto> { new(candidate1!.Id, null) });
+        var voteRequest = new SubmitVoteDto("voter@test.com", new List<VoteItemDto> { new(candidate1.Id, null) });
         var rVoteFail = await _client.PostAsJsonAsync($"/api/elections/{electionId}/vote", voteRequest);
-        Assert.Equal(HttpStatusCode.BadRequest, rVoteFail.StatusCode); 
+        Assert.Equal(HttpStatusCode.BadRequest, rVoteFail.StatusCode);
 
-        // 4. Force Active via DB
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<VotingDbContext>();
-            var dbElection = await db.Elections.FindAsync(electionId);
-            if (dbElection != null)
-            {
-                dbElection.Status = ElectionStatus.Active;
-                await db.SaveChangesAsync();
-            }
-        }
+        // 4. Open Election via API (Draft → Active). Was previously a DB write hack.
+        var rOpen = await _client.PostAsync($"/api/elections/{electionId}/open", null);
+        rOpen.EnsureSuccessStatusCode();
 
         // 5. Vote Successfully
         var rVoteSuccess = await _client.PostAsJsonAsync($"/api/elections/{electionId}/vote", voteRequest);
